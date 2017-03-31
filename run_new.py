@@ -150,11 +150,13 @@ def run_workflow(file_list, working_dir, num_contrasts, mat_file, con_file, num_
 	for current_contrast in range(1, num_contrasts+1):
 		skipTo.append(' --skipTo={0}'.format(current_contrast))	
 	
-	randomise = pe.Node (interface= fsl.Randomise(),
-		   				name = 'fsl_randomise_{0}'.format(current_contrast))						
-	randomise.iterables = ("args", skipTo)
+	randomise = pe.MapNode(interface= fsl.Randomise(),
+                               name = 'fsl_randomise',
+                               iterfield=['args'])						
+	#randomise.iterables = ("args", skipTo)
 	wf.connect(mask, 'out_file', randomise, 'mask')	
 	rando_out_prefix="rando_pipe"
+        randomise.inputs.args = skipTo
 	randomise.inputs.base_name= rando_out_prefix
 	randomise.inputs.design_mat = mat_file
 	randomise.inputs.tcon = con_file
@@ -165,40 +167,40 @@ def run_workflow(file_list, working_dir, num_contrasts, mat_file, con_file, num_
 
 	#thresh
 	thresh = pe.MapNode (interface = fsl.Threshold(),
-				  		 name = 'fsl_threshold_{0}'.format(current_contrast),
+				  		 name = 'fsl_threshold',
 				  		 iterfield = ['in_file'])	
 	wf.connect(randomise,"t_corrected_p_files", thresh,"in_file")
 	thresh.inputs.thresh = 0.95
-	thresh_output_file = 'rando_pipe_thresh_tstat{0}'.format(current_contrast)
+	thresh_output_file = 'rando_pipe_thresh_tstat'
 	thresh.inputs.out_file = thresh_output_file
 			
-	thresh_bin = pe.MapNode (interface = fsl.maths.MathsCommand(),
-					  			 name = 'fsl_threshold_bin_{0}'.format(current_contrast),
-					  			 iterfield = ['in_file'])	
+	thresh_bin = pe.MapNode(interface = fsl.maths.MathsCommand(),
+				name = 'fsl_threshold_bin',
+				iterfield = ['in_file'])	
 	wf.connect(thresh,"out_file", thresh_bin,"in_file")
 	thresh.inputs.args = '-bin'
 
-			#ApplyMask
+	#ApplyMask
 	apply_mask = pe.MapNode(interface = fsl.ApplyMask(),
-								name = 'fsl_applymask_{0}'.format(current_contrast),
-								iterfield = ['in_file', 'mask_file'])
+				name = 'fsl_applymask',
+				iterfield = ['in_file', 'mask_file'])
 	wf.connect(randomise, 'tstat_files', apply_mask, 'in_file')	
 	wf.connect(thresh_bin, 'out_file', apply_mask, 'mask_file')
 
 			#cluster
-	cluster = pe.MapNode(interface = fsl.Cluster(),
-					  		 name = 'cluster_{0}'.format(current_contrast),
-					  		 iterfield = ['in_file'])	
+	cluster = pe.MapNode(interface=fsl.Cluster(),
+			     name='cluster',
+			     iterfield = ['in_file'])	
 	wf.connect(apply_mask, 'out_file', cluster, 'in_file')
 	cluster.inputs.threshold = 0.0001
-	cluster.inputs.out_index_file = "cluster_index_{0}".format(current_contrast)
-	cluster.inputs.out_localmax_txt_file = "lmax_{0}.txt".format(current_contrast)
-	cluster.inputs.out_size_file = "cluster_size_{0}".format(current_contrast)
-	cluster.inputs.out_threshold_file = "rando_out_prefix_{0}".format(current_contrast)	
+	cluster.inputs.out_index_file = "cluster_index"
+	cluster.inputs.out_localmax_txt_file = "lmax.txt"
+	cluster.inputs.out_size_file = "cluster_size"
+	cluster.inputs.out_threshold_file = "rando_out_prefix"
 	cluster.inputs.terminal_output = 'file'	
 			
 		#save
-	datasink = pe.Node(nio.DataSink(), name='sinker_{0}'.format(current_contrast))
+	datasink = pe.Node(nio.DataSink(), name='sinker')
 	datasink.inputs.base_directory = output_dir
 			
 	wf.connect(cluster, 'index_file', datasink, 'output.@index_file')
