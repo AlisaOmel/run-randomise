@@ -29,7 +29,7 @@ def model_setup(in_model_file, in_bids_dir, model_files_outdir):
             t_columns.append(column)
         in_columns = list(set(t_columns))
 
-    # read in the pheno file
+    # read in the phenotypic file
     pheno_df = pd.read_csv(os.path.join(in_bids_dir, 'participants.tsv'), sep='\t')
 
     # reduce the file to just the columns that we are interested in
@@ -57,15 +57,17 @@ def model_setup(in_model_file, in_bids_dir, model_files_outdir):
             if not f_dict['ses']:
                 f_dict['ses'] = '1'
 
+            f_participant_name = "-".join(["sub", f_dict["sub"]])
+
             # find the row of the pheno_df that corresponds to the file and save it to pheno_key_list
             participant_index = [index for index, participant_id in enumerate(pheno_df["participant_id"])
-                                 if participant_id == "-".join(["sub", f_dict["sub"]])]
+                                 if participant_id == f_participant_name]
 
             if len(participant_index) == 0:
                 print("Could not find entry in phenotype file for {0}, dropping it.".format(
                     os.path.join(root, filename)))
             elif len(participant_index) > 1:
-                raise ValueError("Found multiple entries for {0} in {1}", f_participant_id,
+                raise ValueError("Found multiple entries for {0} in {1}", f_participant_name,
                                  os.path.join(in_bids_dir, 'participants.tsv'))
             else:
                 pheno_key_list.append(participant_index[0])
@@ -136,14 +138,14 @@ if __name__ == "__main__":
     parser.add_argument('analysis_level', help='Level of the analysis that will be performed. '
                         'Multiple participant level analyses can be run independently '
                         '(in parallel) using the same output_dir. Use test_model to generate'
-                        'the model and contrast files, but not run the anlaysis.',
+                        'the model and contrast files, but not run the analysis.',
                         choices=['participant', 'group', 'test_model'])
     parser.add_argument('model_file', help='JSON file describing the model and contrasts'
                         'that should be.')
     parser.add_argument('--num_iterations', help='Number of iterations used by randomise.',
                         default=10000, type=int)
     parser.add_argument('--num_processors', help='Number of processors used at a time for randomise',
-                        default=2, type=int)
+                        default=1, type=int)
     parser.add_argument('-v', '--version', action='version',
                         version='BIDS-App example version {}'.format(__version__))
 
@@ -235,12 +237,11 @@ if __name__ == "__main__":
             wf.connect(merge, 'merged_file', randomise, 'in_file')
 
             select_t_corrected = pe.Node(niu.Function(input_names=["input_list"],
-                                               output_names=['out_file'],
-                                               function=select),
-                                               name = 'select_t_cor{0}'.format(current_contrast))
+                                                      output_names=['out_file'],
+                                                      function=select),
+                                         name='select_t_cor{0}'.format(current_contrast))
 
             wf.connect(randomise, "t_corrected_p_files", select_t_corrected, "input_list")
-
 
             # threshold the resulting t corrected p file
             thresh = pe.Node(interface=fsl.Threshold(),
@@ -257,9 +258,9 @@ if __name__ == "__main__":
             wf.connect(thresh, "out_file", thresh_bin, "in_file")
 
             select_t_stat = pe.Node(niu.Function(input_names=["input_list"],
-                                                      output_names=['out_file'],
-                                                      function=select),
-                                         name='select_item_t_stat{0}'.format(current_contrast))
+                                                 output_names=['out_file'],
+                                                 function=select),
+                                    name='select_item_t_stat{0}'.format(current_contrast))
 
             wf.connect(randomise, "tstat_files", select_t_stat, "input_list")
 
