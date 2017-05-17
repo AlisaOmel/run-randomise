@@ -8,9 +8,21 @@ MAINTAINER John Pellman <john.pellman@childmind.org>
     #&& bash cpac_install.sh
 
 RUN sudo apt-get update && sudo apt-get upgrade -y && apt-get -y install python-dev python-pip 
+RUN pip install -ipython 
+#RUN pip install NumPy
+RUN pip install pyparsing
+RUN pip install setuptools
+RUN sudo apt-get install -y python-dateutil 
+RUN pip install cycler 
+RUN pip install pytz
+RUN sudo apt-get update && sudo apt-get install -y python-matplotlib
 RUN sudo apt-get install -y python-scipy
+RUN pip install scikit-learn 
+RUN pip install nibabel
 RUN sudo apt-get install -y python-nipype
 RUN pip install pandas patsy 
+RUN pip install -U --user nilearn
+
 
 ENV FSLDIR /usr/share/fsl/5.0
 ENV FSLOUTPUTTYPE NIFTI_GZ
