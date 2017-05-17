@@ -66,6 +66,8 @@ def model_setup(in_model_file, in_bids_dir, model_files_outdir):
 
             f_participant_name = "-".join(["sub", f_dict["sub"]])
 
+            f_participant_name = "-".join(["sub", f_dict["sub"]])
+
             # find the row of the pheno_df that corresponds to the file and save it to pheno_key_list
             participant_index = [index for index, participant_id in enumerate(pheno_df["participant_id"])
                                  if participant_id == f_participant_name]
@@ -324,5 +326,4 @@ if __name__ == "__main__":
             wf.connect(cluster, 'pval_file', datasink, 'output.@pval_file')
             wf.connect(cluster, 'size_file', datasink, 'output.@size_file')
             wf.connect(nilearn_plotting, 'out_file', datasink, 'output.@out_file')
-            
         wf.run(plugin="MultiProc", plugin_args={"n_procs": num_processors})
