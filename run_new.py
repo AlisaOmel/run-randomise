@@ -8,11 +8,15 @@ import patsy
 import json
 import numpy as np
 from create_flame_model_files import create_flame_model_files
+import nilearn
+
 
 __version__ = 0.1
 
 
 def model_setup(in_model_file, in_bids_dir, model_files_outdir):
+    #load in template
+    template = os.path.join(os.getcwd(), 'bids_in', 'MNI152_.5mm_masked_edged.nii.gz')
 
     # load in the model
     with open(in_model_file) as model_fd:
@@ -29,7 +33,7 @@ def model_setup(in_model_file, in_bids_dir, model_files_outdir):
             t_columns.append(column)
         in_columns = list(set(t_columns))
 
-    # read in the pheno file
+    # read in the phenotypic file
     pheno_df = pd.read_csv(os.path.join(in_bids_dir, 'participants.tsv'), sep='\t')
 
     # reduce the file to just the columns that we are interested in
@@ -53,19 +57,24 @@ def model_setup(in_model_file, in_bids_dir, model_files_outdir):
             # make a dictionary from the key-value chunks
             f_chunks = (filename.split(".")[0]).split("_")
             f_dict = {chunk.split("-")[0]: "-".join(chunk.split("-")[1:]) for chunk in f_chunks[:-1]}
+            
+            try:
+                if not f_dict['ses']:
+                        f_dict['ses'] = '1'
+            except KeyError:
+                continue
 
-            if not f_dict['ses']:
-                f_dict['ses'] = '1'
+            f_participant_name = "-".join(["sub", f_dict["sub"]])
 
             # find the row of the pheno_df that corresponds to the file and save it to pheno_key_list
             participant_index = [index for index, participant_id in enumerate(pheno_df["participant_id"])
-                                 if participant_id == "-".join(["sub", f_dict["sub"]])]
+                                 if participant_id == f_participant_name]
 
             if len(participant_index) == 0:
                 print("Could not find entry in phenotype file for {0}, dropping it.".format(
                     os.path.join(root, filename)))
             elif len(participant_index) > 1:
-                raise ValueError("Found multiple entries for {0} in {1}", f_participant_id,
+                raise ValueError("Found multiple entries for {0} in {1}", f_participant_name,
                                  os.path.join(in_bids_dir, 'participants.tsv'))
             else:
                 pheno_key_list.append(participant_index[0])
@@ -95,10 +104,12 @@ def model_setup(in_model_file, in_bids_dir, model_files_outdir):
     # create contrasts
     if model_dict["contrasts"]:
         contrast_dict = {}
+        contrast_names_dict = {}
         t_num_contrasts = 0
 
         for k in model_dict["contrasts"]:
             t_num_contrasts += 1
+            contrast_names_dict[t_num_contrasts] = k
             try:
                 contrast_dict[k] = [n if n != -0 else 0
                                     for n in design.design_info.linear_constraint(k.encode('ascii')).coefs[0]]
@@ -118,7 +129,7 @@ def model_setup(in_model_file, in_bids_dir, model_files_outdir):
                                                                               "randomise_pipe_model",
                                                                               [], model_files_outdir)
 
-    return t_file_list, t_num_contrasts, t_mat_file, t_con_file
+    return t_file_list, t_num_contrasts, t_mat_file, t_con_file, contrast_names_dict, template
 
 
 if __name__ == "__main__":
@@ -136,14 +147,14 @@ if __name__ == "__main__":
     parser.add_argument('analysis_level', help='Level of the analysis that will be performed. '
                         'Multiple participant level analyses can be run independently '
                         '(in parallel) using the same output_dir. Use test_model to generate'
-                        'the model and contrast files, but not run the anlaysis.',
+                        'the model and contrast files, but not run the analysis.',
                         choices=['participant', 'group', 'test_model'])
     parser.add_argument('model_file', help='JSON file describing the model and contrasts'
                         'that should be.')
     parser.add_argument('--num_iterations', help='Number of iterations used by randomise.',
                         default=10000, type=int)
     parser.add_argument('--num_processors', help='Number of processors used at a time for randomise',
-                        default=2, type=int)
+                        default=1, type=int)
     parser.add_argument('-v', '--version', action='version',
                         version='BIDS-App example version {}'.format(__version__))
 
@@ -179,7 +190,7 @@ if __name__ == "__main__":
 
     print ("\n")
     print ("## Running randomize pipeline with parameters:")
-    print ("Output directory: {0}".format(bids_dir))
+    print ("Input directory: {0}".format(bids_dir))
     print ("Output directory: {0}".format(output_dir))
     print ("Working directory: {0}".format(working_dir))
     print ("Pheno file: {0}".format(args.model_file))
@@ -187,7 +198,9 @@ if __name__ == "__main__":
     print ("Number of processors: {0}".format(num_processors))
     print ("\n")
 
-    file_list, num_contrasts, mat_file, con_file = model_setup(model_file, bids_dir, working_dir)
+    deriv_name = working_dir.split("/")[-1]
+
+    file_list, num_contrasts, mat_file, con_file, contrast_names_dict, template = model_setup(model_file, bids_dir, working_dir)
 
     if args.analysis_level == "participant":
         print("This bids-app does not support individual level analyses")
@@ -198,6 +211,7 @@ if __name__ == "__main__":
         import nipype.interfaces.fsl as fsl
         import nipype.interfaces.io as nio
         import nipype.interfaces.utility as niu
+
         wf = pe.Workflow(name='wf_randomize')
         wf.base_dir = working_dir
 
@@ -221,7 +235,14 @@ if __name__ == "__main__":
             out_file = input_list[0]
             return out_file
 
-        for current_contrast in range(1, num_contrasts + 1):
+        def nilearn_plot(in_file, out_file, title, template):
+            import os
+            from nilearn import plotting
+            out_file = os.path.join(os.getcwd(), out_file)
+            plotting.plot_stat_map(in_file, bg_img = template, output_file= out_file, display_mode='ortho', colorbar=True, title= title)
+            return out_file
+
+        for current_contrast in contrast_names_dict:#range(1, num_contrasts + 1):
             # use randomize to use perform permutation test for contrast
             randomise = pe.Node(interface=fsl.Randomise(), name='fsl_randomise_{0}'.format(current_contrast))
             wf.connect(mask, 'out_file', randomise, 'mask')
@@ -235,12 +256,11 @@ if __name__ == "__main__":
             wf.connect(merge, 'merged_file', randomise, 'in_file')
 
             select_t_corrected = pe.Node(niu.Function(input_names=["input_list"],
-                                               output_names=['out_file'],
-                                               function=select),
-                                               name = 'select_t_cor{0}'.format(current_contrast))
+                                                      output_names=['out_file'],
+                                                      function=select),
+                                         name='select_t_cor{0}'.format(current_contrast))
 
             wf.connect(randomise, "t_corrected_p_files", select_t_corrected, "input_list")
-
 
             # threshold the resulting t corrected p file
             thresh = pe.Node(interface=fsl.Threshold(),
@@ -257,9 +277,9 @@ if __name__ == "__main__":
             wf.connect(thresh, "out_file", thresh_bin, "in_file")
 
             select_t_stat = pe.Node(niu.Function(input_names=["input_list"],
-                                                      output_names=['out_file'],
-                                                      function=select),
-                                         name='select_item_t_stat{0}'.format(current_contrast))
+                                                 output_names=['out_file'],
+                                                 function=select),
+                                    name='select_item_t_stat{0}'.format(current_contrast))
 
             wf.connect(randomise, "tstat_files", select_t_stat, "input_list")
 
@@ -280,6 +300,16 @@ if __name__ == "__main__":
             cluster.inputs.terminal_output = 'file'
             wf.connect(apply_mask, 'out_file', cluster, 'in_file')
 
+            nilearn_plotting = pe.Node(niu.Function(input_names= ['in_file','out_file','title', 'template'],
+                                                output_names= ['out_file'],
+                                                function= nilearn_plot),
+                                    name= 'nilearn_image_{0}'.format(current_contrast))                        
+            nilearn_plotting.inputs.title = '{0}_{1}'.format(deriv_name, contrast_names_dict[current_contrast])
+            nilearn_plotting.inputs.template = template
+            nilearn_plotting.inputs.out_file= '{0}_{1}_nilearn.png'.format(deriv_name, contrast_names_dict[current_contrast])
+            wf.connect(thresh, "out_file", nilearn_plotting, "in_file")
+
+
             # attach a datasink to save the output
             datasink = pe.Node(nio.DataSink(), name='sinker_contrast_{0}'.format(current_contrast))
             datasink.inputs.base_directory = output_dir
@@ -293,5 +323,6 @@ if __name__ == "__main__":
             wf.connect(cluster, 'mean_file', datasink, 'output.@mean_file')
             wf.connect(cluster, 'pval_file', datasink, 'output.@pval_file')
             wf.connect(cluster, 'size_file', datasink, 'output.@size_file')
-
+            wf.connect(nilearn_plotting, 'out_file', datasink, 'output.@out_file')
+            
         wf.run(plugin="MultiProc", plugin_args={"n_procs": num_processors})
